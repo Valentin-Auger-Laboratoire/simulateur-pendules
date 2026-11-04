@@ -702,7 +702,7 @@
     views.clock = (() => {
       const st = { material: 'laiton', temp: 20, dL: 0, lat: 45, amp: 4, speed: 1 };
       const LAT_REF = 45; // lieu de réglage
-      let y, tt, beats, lastSign, playing = !reduce, defs, L0, gRef, startReal, wheelAngle, wheelTarget;
+      let y, tt, beats, lastSign, playing = !reduce, defs, L0, gRef, startReal, wheelAngle, wheelTarget, ref0 = null;
       const physics = () => {
         gRef = P.gravityAtLatitude(LAT_REF);
         L0 = P.lengthForPeriod(2, gRef, 4 * DEG); // horloge réglée à 20 °C, amplitude 4°, à 45° de latitude
@@ -713,20 +713,23 @@
       let ph;
       function reset() {
         ph = physics();
-        y = [st.amp * DEG, 0]; tt = 0; beats = 0; lastSign = 1; wheelAngle = 0; wheelTarget = 0;
+        y = [st.amp * DEG, 0]; tt = 0; beats = 0; lastSign = 1; wheelAngle = 0; wheelTarget = 0; ref0 = null;
         const now = new Date(); startReal = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
         kpis(); tables();
       }
       // L'échappement rend l'énergie à chaque passage au point mort : amplitude constante
       const target = () => 2 * ph.g / ph.L * (1 - Math.cos(st.amp * DEG));
       function step(dt) {
-        const p = { g: ph.g, L: ph.L, gamma: 0.02 }, h = 1 / 400;
+        const p = { g: ph.g, L: ph.L, gamma: 0.002 }, h = 1 / 400;
         const n = Math.round((dt * st.speed) / h);
         for (let i = 0; i < n; i++) {
           const yn = P.rk4(P.simpleDeriv, y, tt, h, p);
           tt += h;
           if ((y[0] < 0) !== (yn[0] < 0)) {
             beats++; // une alternance = un battement = une seconde affichée
+            // instant exact du passage (interpolé) : sert de référence pour mesurer la marche
+            const tc = tt - h + (h * Math.abs(y[0])) / (Math.abs(y[0]) + Math.abs(yn[0]));
+            if (!ref0) ref0 = { t: tc, beats }; else ref0.last = { t: tc, beats };
             const w2 = target() - 2 * ph.g / ph.L * (1 - Math.cos(yn[0]));
             yn[1] = Math.sign(yn[1] || 1) * Math.sqrt(Math.max(0, w2));
             wheelTarget += (Math.PI * 2) / 60; // la roue de 30 dents avance d'une demi-dent par battement
@@ -739,7 +742,8 @@
       }
       function kpis() {
         const r = ph.rate;
-        const meas = tt > 20 ? 86400 * ((beats - tt) / tt) : NaN;
+        // marche mesurée entre le premier et le dernier passage par la verticale
+        const meas = ref0 && ref0.last && ref0.last.t - ref0.t > 20 ? 86400 * ((ref0.last.beats - ref0.beats) - (ref0.last.t - ref0.t)) / (ref0.last.t - ref0.t) : NaN;
         $('kpi-clock').innerHTML = kpi(t('kLsec'), fmt(P.secondsPendulumLength(P.G0) * 100, 2), 'cm') + kpi(t('kPer'), fmt(r.period, 5), 's') +
           kpi(t('kRate'), fmtSigned(r.total, 2), t('perDay'), true) + kpi(t('kMeas'), Number.isFinite(meas) ? fmtSigned(meas, 1) : '<small>' + t('waiting') + '</small>', Number.isFinite(meas) ? t('perDay') : '');
         const hms = (s) => { s = ((Math.floor(s) % 86400) + 86400) % 86400; return [Math.floor(s / 3600), Math.floor(s / 60) % 60, s % 60].map((v) => String(v).padStart(2, '0')).join(':'); };
@@ -781,7 +785,7 @@
         hand((sec % 60) / 60, R * 0.84, 1.5, COLORS.accent);
         c.fillStyle = COLORS.accent; c.beginPath(); c.arc(cx, cy, 4, 0, Math.PI * 2); c.fill();
         // ----- échappement à ancre -----
-        const ey = cy + R + 62, er = Math.min(58, w * 0.11);
+        const er = Math.min(58, w * 0.11), ey = cy + R + er + 34;
         // roue d'échappement (30 dents en dents de scie)
         c.save(); c.translate(cx, ey); c.rotate(wheelAngle);
         c.fillStyle = '#2b2416'; c.strokeStyle = COLORS.brass; c.lineWidth = 1.4;
